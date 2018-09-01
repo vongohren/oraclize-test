@@ -1,116 +1,153 @@
-// Import the page's CSS. Webpack will know what to do with it.
-import '../styles/app.css'
+// Import the page's CSS. Webpack will know what to do with it,
+// as it's been configured by truffle-webpack
+import "../styles/app.css";
 
 // Import libraries we need.
-import { default as Web3 } from 'web3'
+import { default as Web3} from 'web3';
 import { default as contract } from 'truffle-contract'
 
 // Import our contract artifacts and turn them into usable abstractions.
-import metaCoinArtifact from '../../build/contracts/MetaCoin.json'
+// Make sure you've ran truffle compile first
+import contract_build_artifacts from '../../build/contracts/OraclizeTest.json'
 
-// MetaCoin is our usable abstraction, which we'll use through the code below.
-const MetaCoin = contract(metaCoinArtifact)
+// OraclizeContract is our usable abstraction, which we'll use through the code below.
+var OraclizeContract = contract(contract_build_artifacts);
 
-// The following code is simple to show off interacting with your contracts.
-// As your needs grow you will likely need to change its form and structure.
-// For application bootstrapping, check out window.addEventListener below.
-let accounts
-let account
+var accounts;
+var account;
 
-const App = {
-  start: function () {
-    const self = this
+window.App = {
+  currentBalance: 0,
+  ethPriceinUSD: 0,
 
-    // Bootstrap the MetaCoin abstraction for Use.
-    MetaCoin.setProvider(web3.currentProvider)
+  // 'Constructor'
+  start: function() {
+    var self = this;
+
+    // Bootstrap the Contract abstraction for use with the current web3 instance
+    OraclizeContract.setProvider(web3.currentProvider);
 
     // Get the initial account balance so it can be displayed.
-    web3.eth.getAccounts(function (err, accs) {
+    web3.eth.getAccounts(function(err, accs) {
       if (err != null) {
-        alert('There was an error fetching your accounts.')
-        return
+        alert("There was an error fetching your accounts.");
+        return;
       }
 
-      if (accs.length === 0) {
-        alert("Couldn't get any accounts! Make sure your Ethereum client is configured correctly.")
-        return
+      if (accs.length == 0) {
+        alert("Couldn't get any accounts! Make sure your Ethereum client is configured correctly.");
+        return;
       }
 
-      accounts = accs
-      account = accounts[0]
+      accounts = accs;
+      account = accounts[0];
 
-      self.refreshBalance()
+      self.refreshBalance();
+    });
+  },
+
+  // Show an error
+  setStatus: function(message) {
+    var status = document.getElementById("status");
+    status.innerHTML = message;
+  },
+
+  // Opens a socket and listens for Events defined in our contract.
+  addEventListeners: function(instance){
+    var LogCreated = instance.LogUpdate({},{fromBlock: 0, toBlock: 'latest'});
+    var LogPriceUpdate = instance.LogPriceUpdate({},{fromBlock: 0, toBlock: 'latest'});
+    var LogInfo = instance.LogInfo({},{fromBlock: 0, toBlock: 'latest'});
+
+    //
+    LogPriceUpdate.watch(function(err, result){
+      if(!err){
+        App.ethPriceinUSD = result.args.price;
+        App.showBalance(App.ethPriceinUSD, App.currentBalance);
+      }else{
+        console.log(err)
+      }
+    })
+
+    // Emitted when the Contract's constructor is run
+    LogCreated.watch(function(err, result){
+      if(!err){
+        console.log('Contract created!');
+        console.log('Owner: ' , result.args._owner);
+        console.log('Balance: ' , web3.fromWei(result.args._balance, 'ether').toString(), 'ETH');
+        console.log('-----------------------------------');
+      }else{
+        console.log(err)
+      }
+    })
+
+    // Emitted when a text message needs to be logged to the front-end from the Contract
+    LogInfo.watch(function(err, result){
+      if(!err){
+        console.info(result.args)
+      }else{
+        console.error(err)
+      }
     })
   },
 
-  setStatus: function (message) {
-    const status = document.getElementById('status')
-    status.innerHTML = message
+  refreshBalance: function() {
+    var self = this;
+
+    var meta;
+
+    OraclizeContract.deployed().then(function(instance) {
+      meta = instance;
+
+      App.addEventListeners(instance);
+
+      return meta.getBalance.call({from: account});
+    }).then(function(value) {
+      console.log('dsadakdasjdka')
+      console.log(value)
+      App.currentBalance = web3.fromWei(value.valueOf(), 'ether');
+      console.log(App.currentBalance)
+      App.showBalance(App.ethPriceinUSD, App.currentBalance);
+    }).catch(function(e) {
+      console.log(e);
+      self.setStatus("Error getting balance; see console log.");
+    });
   },
 
-  refreshBalance: function () {
-    const self = this
+  showBalance: function(price, balance){
+    console.log('PRICE AND BALANCE')
+    console.log(price, balance)
+    // Balance updated, start CSS animation
+    var row = document.getElementById('row');
+    row.style.animation = 'heartbeat 0.75s';
 
-    let meta
-    MetaCoin.deployed().then(function (instance) {
-      meta = instance
-      return meta.getBalance.call(account, { from: account })
-    }).then(function (value) {
-      const balanceElement = document.getElementById('balance')
-      balanceElement.innerHTML = value.valueOf()
-    }).catch(function (e) {
-      console.log(e)
-      self.setStatus('Error getting balance; see log.')
-    })
-  },
+    // Removes CSS animation after 1100 ms
+    setTimeout(function(row){
+      var row = document.getElementById('row');
+      row.style.animation = null;
+    }, 1100)
 
-  sendCoin: function () {
-    const self = this
+    var balance_element = document.getElementById("balance");
+    // Rounding can be more precise, this is just an example
+    balance_element.innerHTML = parseFloat(balance).toFixed(6);
 
-    const amount = parseInt(document.getElementById('amount').value)
-    const receiver = document.getElementById('receiver').value
-
-    this.setStatus('Initiating transaction... (please wait)')
-
-    let meta
-    MetaCoin.deployed().then(function (instance) {
-      meta = instance
-      return meta.sendCoin(receiver, amount, { from: account })
-    }).then(function () {
-      self.setStatus('Transaction complete!')
-      self.refreshBalance()
-    }).catch(function (e) {
-      console.log(e)
-      self.setStatus('Error sending coin; see log.')
-    })
+    var total_element = document.getElementById("total");
+    total_element.innerHTML = (price * balance).toFixed(2);
   }
-}
+};
 
-window.App = App
-
-window.addEventListener('load', function () {
+// Front-end entry point
+window.addEventListener('load', function() {
   // Checking if Web3 has been injected by the browser (Mist/MetaMask)
   if (typeof web3 !== 'undefined') {
-    console.warn(
-      'Using web3 detected from external source.' +
-      ' If you find that your accounts don\'t appear or you have 0 MetaCoin,' +
-      ' ensure you\'ve configured that source properly.' +
-      ' If using MetaMask, see the following link.' +
-      ' Feel free to delete this warning. :)' +
-      ' http://truffleframework.com/tutorials/truffle-and-metamask'
-    )
+    console.warn("Using web3 detected from external source. If you find that your accounts don't appear or you have 0 MetaCoin, ensure you've configured that source properly. If using MetaMask, see the following link. Feel free to delete this warning. :) http://truffleframework.com/tutorials/truffle-and-metamask")
     // Use Mist/MetaMask's provider
-    window.web3 = new Web3(web3.currentProvider)
+    window.web3 = new Web3(web3.currentProvider);
   } else {
-    console.warn(
-      'No web3 detected. Falling back to http://127.0.0.1:9545.' +
-      ' You should remove this fallback when you deploy live, as it\'s inherently insecure.' +
-      ' Consider switching to Metamask for development.' +
-      ' More info here: http://truffleframework.com/tutorials/truffle-and-metamask'
-    )
+    console.warn("No web3 detected. Falling back to http://127.0.0.1:9545. You should remove this fallback when you deploy live, as it's inherently insecure. Consider switching to Metamask for development. More info here: http://truffleframework.com/tutorials/truffle-and-metamask");
     // fallback - use your fallback strategy (local node / hosted node + in-dapp id mgmt / fail)
-    window.web3 = new Web3(new Web3.providers.HttpProvider('http://127.0.0.1:9545'))
+    window.web3 = new Web3(new Web3.providers.HttpProvider("http://127.0.0.1:9545"));
   }
 
-  App.start()
-})
+  // All systems go, start App!
+  App.start();
+});
